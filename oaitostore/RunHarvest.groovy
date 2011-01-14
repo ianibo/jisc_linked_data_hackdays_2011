@@ -7,6 +7,15 @@
 // Researchspace.org
 import com.hp.hpl.jena.rdf.model.*
 import com.hp.hpl.jena.vocabulary.*
+import groovyx.net.http.*
+import static groovyx.net.http.ContentType.URLENC
+import static groovyx.net.http.ContentType.*
+import static groovyx.net.http.Method.*
+import groovyx.net.http.*
+import org.apache.http.entity.mime.*
+import org.apache.http.entity.mime.content.*
+import java.nio.charset.Charset
+
 
 String findWikipediaReference() {
   return ""
@@ -14,6 +23,10 @@ String findWikipediaReference() {
 
 def oai_client = new OAIClient()
 
+
+
+
+// Define some schema specific closures
 def oaidc = { record ->
   def identifier = record.header.identifier;
   def metadata = record.metadata
@@ -48,14 +61,20 @@ cgItemHandler = { record ->
   // create the resource
   //   and add the properties cascading style
   def Resource new_res = model.createResource(dc_identifier.text())
-  addValuesToModel(model,new_res,dc_titles,DC.title)
-  addValuesToModel(model,new_res,dc_descriptions,DC.description)
-  addValuesToModel(model,new_res,dc_subjects,DC.subject)
-  addValuesToModel(model,new_res,partof,DC.isPartOf)
-  addValuesToModel(model,new_res,type,DC.type)
+  addValuesToModel(model,new_res,dc_titles,DCTerms.title)
+  addValuesToModel(model,new_res,dc_descriptions,DCTerms.description)
+  addValuesToModel(model,new_res,dc_subjects,DCTerms.subject)
+  addValuesToModel(model,new_res,partOf,DCTerms.isPartOf)
+  addValuesToModel(model,new_res,type,DCTerms.type)
   // model.write(System.out, "N-TRIPLE")
-  model.write(System.out)
+  // model.write(System.out)
+  def sw = new java.io.StringWriter()
+  model.write(sw)
+  println "Attempting to publish ${dc_identifier.text()}"
+  publish(dc_identifier.text(), sw.toString())
 }
+
+// Helpers
 
 void addValuesToModel(model, resource, values, predicate) {
   if ( values.size() == 0 ) {
@@ -68,6 +87,29 @@ void addValuesToModel(model, resource, values, predicate) {
   }
   else {
     reference(model,resource, values.text(), predicate, null)
+  }
+}
+
+void publish(graph_uri, rdfxml) {
+  try {
+    def endpoint = new HTTPBuilder( 'http://localhost:9000/data/' )
+    def response = endpoint.post(
+    body: [
+      searchname: "%",
+      // contentType: groovyx.net.http.ContentType.TEXT,
+      requestContentType: URLENC,
+      "mime-type": "application/rdf",  // application/x-turtle, text/rdf+n3, text/rdf+nt, application/x-trig
+      graph: graph_uri,
+      data: rdfxml
+    ]) {  resp ->
+      println "${resp}"
+    }
+  }
+  catch ( Exception e ) {
+    println "Problem ${e}"
+    e.printStackTrace()
+  }
+  finally {
   }
 }
 
