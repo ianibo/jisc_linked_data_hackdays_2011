@@ -5,6 +5,7 @@
     @Grab(group='xerces', module='xercesImpl', version='2.9.1') ])
 
 // Researchspace.org
+
 import com.hp.hpl.jena.rdf.model.*
 import com.hp.hpl.jena.vocabulary.*
 import groovyx.net.http.*
@@ -71,7 +72,7 @@ cgItemHandler = { record ->
   def sw = new java.io.StringWriter()
   model.write(sw)
   println "Attempting to publish ${dc_identifier.text()}"
-  publish(dc_identifier.text(), sw.toString())
+  publish(identifier.text(), sw.toString())
 }
 
 // Helpers
@@ -92,14 +93,20 @@ void addValuesToModel(model, resource, values, predicate) {
 
 void publish(graph_uri, rdfxml) {
   try {
-    def endpoint = new HTTPBuilder( 'http://localhost:9000/data/' )
+    // def endpoint = new HTTPBuilder( 'http://localhost:9000/data/' )
+    println "Deleteing and recreating graph at ${graph_uri}"
+    def endpoint = new groovyx.net.http.RESTClient( 'http://localhost:9000/data/' )
+
+    // Firstly, delete any previous graph with this graph_uri
+    endpoint.delete(path:java.net.URLEncoder.encode(graph_uri))
+
     def response = endpoint.post(
     body: [
       searchname: "%",
       // contentType: groovyx.net.http.ContentType.TEXT,
       requestContentType: URLENC,
       "mime-type": "application/rdf",  // application/x-turtle, text/rdf+n3, text/rdf+nt, application/x-trig
-      graph: graph_uri,
+      graph: java.net.URLEncoder.encode(graph_uri),
       data: rdfxml
     ]) {  resp ->
       println "${resp}"
@@ -114,7 +121,10 @@ void publish(graph_uri, rdfxml) {
 }
 
 void reference(model, resource, value, predicate, sources) {
-  resource.addProperty(predicate, value)
+  // Don't create triples like "Unknown Subject" its silly.
+  if ( ! value.contains("unknown") ) {
+    resource.addProperty(predicate, value)
+  }
 }
 
 oai_client.harvest('http://www.culturegrid.org.uk/dpp/oai','CultureGrid_Item', cgItemHandler)
