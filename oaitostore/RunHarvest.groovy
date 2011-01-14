@@ -25,7 +25,18 @@ String findWikipediaReference() {
 def oai_client = new OAIClient()
 
 
+// This closure takes a value passed in a subject and tries to resolve the literal into one or more resource
+def subjectResolver = { model, resource, value ->
+  println "subjectResolver: ${value}"
+  println "Attempt to resolve urn:cg:subject:${value}"
+  def res = null; // getResource("urn:cg:subject:${value}")
+  getResource("urn:cg:subject:${value}")
+  if ( res == null ) {
+    // We need to create a new resource to represent this subject.
+  }
 
+  value
+}
 
 // Define some schema specific closures
 def oaidc = { record ->
@@ -64,7 +75,7 @@ cgItemHandler = { record ->
   def Resource new_res = model.createResource(dc_identifier.text())
   addValuesToModel(model,new_res,dc_titles,DCTerms.title)
   addValuesToModel(model,new_res,dc_descriptions,DCTerms.description)
-  addValuesToModel(model,new_res,dc_subjects,DCTerms.subject)
+  addValuesToModel(model,new_res,dc_subjects,DCTerms.subject, subjectResolver)
   addValuesToModel(model,new_res,partOf,DCTerms.isPartOf)
   addValuesToModel(model,new_res,type,DCTerms.type)
   // model.write(System.out, "N-TRIPLE")
@@ -78,23 +89,60 @@ cgItemHandler = { record ->
 // Helpers
 
 void addValuesToModel(model, resource, values, predicate) {
+  addValuesToModel(model, resource, values, predicate, null)
+}
+
+void addValuesToModel(model, resource, values, predicate, resolver) {
   if ( values.size() == 0 ) {
     // Do nothing
   }
   else if ( values.size() > 1 ) {
     values.each { val ->
-      reference(model,resource, val.text(), predicate, null)
+      reference(model,resource, val.text(), predicate, resolver)
     }
   }
   else {
-    reference(model,resource, values.text(), predicate, null)
+    reference(model,resource, values.text(), predicate, resolver)
   }
+}
+
+void getResource(uri) {
+  def result = null
+  try {
+    def endpoint = new groovyx.net.http.RESTClient( 'http://localhost:9000/sparql/' )
+    def response = endpoint.post(
+      body: [
+        contentType : "application/json",
+        // "content-type": "application/json",    // 4Store doesn't seem to want to return json.
+        query: """PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+                  PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+                  SELECT * WHERE {
+                   <${uri}> ?p ?o
+                  } LIMIT 10 """
+      ]
+    ) { resp, xml ->
+      def xml_response = new XmlSlurper().parseText(xml.text)
+      if ( xml_response.results.children().size() > 0 ) {
+        println "There are results."
+      }
+      else {
+        println "There are no results"
+      }
+    }
+  }
+  catch ( Exception e ) {
+    println "Problem ${e}"
+    e.printStackTrace()
+  }
+  finally {
+  }
+  result
 }
 
 void publish(graph_uri, rdfxml) {
   try {
     // def endpoint = new HTTPBuilder( 'http://localhost:9000/data/' )
-    println "Deleteing and recreating graph at ${graph_uri}"
+    println "Deleteing and recreating graph at ${graph_uri} (${java.net.URLEncoder.encode(graph_uri)})"
     def endpoint = new groovyx.net.http.RESTClient( 'http://localhost:9000/data/' )
 
     // Firstly, delete any previous graph with this graph_uri
@@ -102,8 +150,6 @@ void publish(graph_uri, rdfxml) {
 
     def response = endpoint.post(
     body: [
-      searchname: "%",
-      // contentType: groovyx.net.http.ContentType.TEXT,
       requestContentType: URLENC,
       "mime-type": "application/rdf",  // application/x-turtle, text/rdf+n3, text/rdf+nt, application/x-trig
       graph: java.net.URLEncoder.encode(graph_uri),
@@ -120,10 +166,15 @@ void publish(graph_uri, rdfxml) {
   }
 }
 
-void reference(model, resource, value, predicate, sources) {
+void reference(model, resource, value, predicate, resolver) {
   // Don't create triples like "Unknown Subject" its silly.
   if ( ! value.contains("unknown") ) {
-    resource.addProperty(predicate, value)
+    if ( resolver != null ) {
+      resolver(model, resource, value)
+    }
+    else {
+      resource.addProperty(predicate, value)
+    }
   }
 }
 
